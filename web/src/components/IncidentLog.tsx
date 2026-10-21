@@ -1,5 +1,5 @@
 import type { FwEvent } from '../types';
-import { eventTone, fmtSec } from '../lib/status';
+import { eventTone, fmtSec } from '../lib/rules';
 
 interface Props {
   events: FwEvent[];
@@ -8,11 +8,14 @@ interface Props {
 
 export default function IncidentLog({ events, onOpenImage }: Props) {
   return (
-    <aside className="card log">
-      <div className="label">Incident log</div>
+    <aside className="panel log">
+      <div className="panel-head">
+        <span className="eyebrow">Incident log</span>
+        <span className="muted small">{events.length} events</span>
+      </div>
       <div className="log-scroll">
         {events.map((e) => (
-          <div key={`${e.kind}-${e.t}`} className={`log-item tone-${eventTone[e.kind]} ${e.kind === 'lookalike' ? 'dim' : ''}`}>
+          <div key={`${e.kind}-${e.t}`} className={`log-item ${eventTone[e.kind]}`}>
             <div className="log-time mono">{fmtSec(e.t)}</div>
             <div className="log-main">
               <div className="log-title">{e.title}</div>

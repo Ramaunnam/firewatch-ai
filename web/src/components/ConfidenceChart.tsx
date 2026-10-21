@@ -1,27 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Detections } from '../types';
-import { eventTime } from '../lib/status';
+import type { Detections, Thresholds, Timeline } from '../types';
 
 interface Props {
   data: Detections;
+  tl: Timeline;
+  th: Thresholds;
   t: number;
   onSeek: (t: number) => void;
+  height?: number;
 }
 
-const H = 150;
-const PAD = { l: 34, r: 14, t: 18, b: 22 };
-const AMBER = '#f59e0b';
-const RED = '#ef4444';
+const PAD = { l: 38, r: 12, t: 22, b: 24 };
+const SMOKE = '#f5a524';
+const FIRE = '#f04438';
 
-export default function ConfidenceChart({ data, t, onSeek }: Props) {
+export default function ConfidenceChart({ data, tl, th, t, onSeek, height = 170 }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const [W, setW] = useState(900);
   const [hover, setHover] = useState<number | null>(null);
+  const H = height;
 
   useEffect(() => {
     const el = wrap.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => setW(Math.max(300, e.contentRect.width)));
+    const ro = new ResizeObserver(([e]) => e.contentRect.width > 0 && setW(e.contentRect.width));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -34,41 +36,27 @@ export default function ConfidenceChart({ data, t, onSeek }: Props) {
 
   const paths = useMemo(() => {
     const mk = (key: 'smoke' | 'fire') => {
-      const pts = data.frames.map((f) => `${x(f.t).toFixed(1)},${y(f[key]).toFixed(1)}`);
-      const line = 'M' + pts.join('L');
+      const line = 'M' + data.frames.map((f) => `${x(f.t).toFixed(1)},${y(f[key]).toFixed(1)}`).join('L');
       const area = `${line}L${x(data.frames[data.frames.length - 1].t).toFixed(1)},${y(0)}L${x(0)},${y(0)}Z`;
       return { line, area };
     };
     return { smoke: mk('smoke'), fire: mk('fire') };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, W]);
+  }, [data, W, H]);
 
-  const smokeWarn = eventTime(data.events, 'smoke_warning');
-  const fireAlert = eventTime(data.events, 'fire_alert');
-  const look = eventTime(data.events, 'lookalike');
-  const lookPeak = look === undefined ? 0 : Math.max(...data.frames.filter((f) => Math.abs(f.t - look) < 0.3).map((f) => f.smoke));
-
-  const toTime = (clientX: number) => {
+  const looks = tl.events.filter((e) => e.kind === 'lookalike');
+  const toTime = (cx: number) => {
     const r = wrap.current!.getBoundingClientRect();
-    return Math.max(0, Math.min(dur, ((clientX - r.left - PAD.l) / iw) * dur));
+    return Math.max(0, Math.min(dur, ((cx - r.left - PAD.l) / iw) * dur));
   };
-
-  const hoverFrame = hover === null ? null : data.frames[Math.min(data.frames.length - 1, Math.round(hover * data.video.fps))];
+  const hf = hover === null ? null : data.frames[Math.min(data.frames.length - 1, Math.round(hover * data.video.fps))];
 
   return (
-    <section className="card chart">
-      <div className="label">What the AI saw, frame by frame</div>
+    <div className="chart">
       <div className="legend">
-        <span>
-          <i style={{ background: AMBER }} /> Smoke confidence
-        </span>
-        <span>
-          <i style={{ background: RED }} /> Fire confidence
-        </span>
-        <span className="legend-note">
-          Dashed lines: alarm levels (smoke {Math.round(data.thresholds.smoke * 100)}%, fire{' '}
-          {Math.round(data.thresholds.fire * 100)}%). Click to jump.
-        </span>
+        <span><i style={{ background: SMOKE }} /> Smoke confidence</span>
+        <span><i style={{ background: FIRE }} /> Fire confidence</span>
+        <span className="muted">Dashed lines: alarm levels (smoke {Math.round(th.smoke * 100)}%, fire {Math.round(th.fire * 100)}%). Click to jump.</span>
       </div>
       <div
         ref={wrap}
@@ -77,71 +65,59 @@ export default function ConfidenceChart({ data, t, onSeek }: Props) {
         onMouseMove={(e) => setHover(toTime(e.clientX))}
         onMouseLeave={() => setHover(null)}
       >
-        <svg width={W} height={H} role="img" aria-label="Smoke and fire confidence over the clip">
+        <svg width={W} height={H} role="img" aria-label="Smoke and fire confidence for every frame">
           <defs>
-            <linearGradient id="gSmoke" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0" stopColor={AMBER} stopOpacity="0.28" />
-              <stop offset="1" stopColor={AMBER} stopOpacity="0.02" />
+            <linearGradient id="gS" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0" stopColor={SMOKE} stopOpacity="0.28" />
+              <stop offset="1" stopColor={SMOKE} stopOpacity="0.02" />
             </linearGradient>
-            <linearGradient id="gFire" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0" stopColor={RED} stopOpacity="0.32" />
-              <stop offset="1" stopColor={RED} stopOpacity="0.03" />
+            <linearGradient id="gF" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0" stopColor={FIRE} stopOpacity="0.34" />
+              <stop offset="1" stopColor={FIRE} stopOpacity="0.03" />
             </linearGradient>
           </defs>
           {[0, 0.5, 1].map((v) => (
             <g key={v}>
               <line x1={PAD.l} x2={W - PAD.r} y1={y(v)} y2={y(v)} className="grid" />
-              <text x={PAD.l - 8} y={y(v) + 4} className="axis" textAnchor="end">
-                {v * 100}%
-              </text>
+              <text x={PAD.l - 8} y={y(v) + 4} className="axis" textAnchor="end">{v * 100}%</text>
             </g>
           ))}
           {Array.from({ length: Math.floor(dur / 5) + 1 }, (_, i) => i * 5).map((s) => (
-            <text key={s} x={x(s)} y={H - 4} className="axis" textAnchor="middle">
-              {s} s
-            </text>
+            <text key={s} x={x(s)} y={H - 6} className="axis" textAnchor="middle">{s} s</text>
           ))}
-          <line x1={PAD.l} x2={W - PAD.r} y1={y(data.thresholds.smoke)} y2={y(data.thresholds.smoke)} stroke={AMBER} strokeOpacity={0.55} strokeDasharray="4 4" />
-          <line x1={PAD.l} x2={W - PAD.r} y1={y(data.thresholds.fire)} y2={y(data.thresholds.fire)} stroke={RED} strokeOpacity={0.55} strokeDasharray="4 4" />
-
-          <path d={paths.smoke.area} fill="url(#gSmoke)" />
-          <path d={paths.fire.area} fill="url(#gFire)" />
-          <path d={paths.smoke.line} fill="none" stroke={AMBER} strokeWidth={1.6} strokeLinejoin="round" />
-          <path d={paths.fire.line} fill="none" stroke={RED} strokeWidth={1.6} strokeLinejoin="round" />
-
-          {look !== undefined && (
-            <text x={x(look)} y={y(lookPeak) - 8} className="axis note" textAnchor="middle">
-              look-alike ignored
-            </text>
-          )}
-          {smokeWarn !== undefined && (
+          {tl.smokeWarnAt !== undefined && <rect x={x(tl.smokeWarnAt)} y={PAD.t} width={x(tl.fireAlertAt ?? dur) - x(tl.smokeWarnAt)} height={ih} fill={SMOKE} opacity={0.05} />}
+          {tl.fireAlertAt !== undefined && <rect x={x(tl.fireAlertAt)} y={PAD.t} width={x(dur) - x(tl.fireAlertAt)} height={ih} fill={FIRE} opacity={0.06} />}
+          <line x1={PAD.l} x2={W - PAD.r} y1={y(th.smoke)} y2={y(th.smoke)} stroke={SMOKE} strokeOpacity={0.6} strokeDasharray="4 4" />
+          <line x1={PAD.l} x2={W - PAD.r} y1={y(th.fire)} y2={y(th.fire)} stroke={FIRE} strokeOpacity={0.6} strokeDasharray="4 4" />
+          <path d={paths.smoke.area} fill="url(#gS)" />
+          <path d={paths.fire.area} fill="url(#gF)" />
+          <path d={paths.smoke.line} fill="none" stroke={SMOKE} strokeWidth={1.5} strokeLinejoin="round" />
+          <path d={paths.fire.line} fill="none" stroke={FIRE} strokeWidth={1.5} strokeLinejoin="round" />
+          {looks.map((e) => (
+            <text key={e.t} x={x(e.t)} y={y(0.72)} className="axis note" textAnchor="middle">look-alike ignored</text>
+          ))}
+          {tl.smokeWarnAt !== undefined && (
             <g>
-              <line x1={x(smokeWarn)} x2={x(smokeWarn)} y1={PAD.t - 6} y2={y(0)} stroke={AMBER} strokeWidth={1.2} />
-              <text x={x(smokeWarn) + 4} y={PAD.t + 4} fill={AMBER} className="marker">
-                Smoke warning
-              </text>
+              <line x1={x(tl.smokeWarnAt)} x2={x(tl.smokeWarnAt)} y1={PAD.t - 8} y2={y(0)} stroke={SMOKE} strokeWidth={1.2} />
+              <text x={x(tl.smokeWarnAt) + 5} y={PAD.t - 8} fill={SMOKE} className="marker">Smoke warning {tl.smokeWarnAt.toFixed(1)} s</text>
             </g>
           )}
-          {fireAlert !== undefined && (
+          {tl.fireAlertAt !== undefined && (
             <g>
-              <line x1={x(fireAlert)} x2={x(fireAlert)} y1={PAD.t - 6} y2={y(0)} stroke={RED} strokeWidth={1.2} />
-              <text x={x(fireAlert) + 4} y={PAD.t + 4} fill={RED} className="marker">
-                Fire alert
-              </text>
+              <line x1={x(tl.fireAlertAt)} x2={x(tl.fireAlertAt)} y1={PAD.t - 8} y2={y(0)} stroke={FIRE} strokeWidth={1.2} />
+              <text x={x(tl.fireAlertAt) - 5} y={PAD.t - 8} fill={FIRE} className="marker" textAnchor="end">Fire alert {tl.fireAlertAt.toFixed(1)} s</text>
             </g>
           )}
-
-          {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={PAD.t} y2={y(0)} stroke="#94a3b8" strokeOpacity={0.35} />}
-
-          <line x1={x(t)} x2={x(t)} y1={PAD.t - 6} y2={y(0)} stroke="#e5e7eb" strokeWidth={1.4} />
-          <circle cx={x(t)} cy={PAD.t - 6} r={3.5} fill="#e5e7eb" />
+          {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={PAD.t} y2={y(0)} className="hover-line" />}
+          <line x1={x(t)} x2={x(t)} y1={PAD.t - 2} y2={y(0)} className="playhead" />
+          <circle cx={x(t)} cy={PAD.t - 2} r={3.5} className="playhead-dot" />
         </svg>
-        {hoverFrame && (
-          <div className="chart-tip mono" style={{ left: Math.min(W - 150, Math.max(0, x(hoverFrame.t) + 8)) }}>
-            {hoverFrame.t.toFixed(1)} s · smoke {Math.round(hoverFrame.smoke * 100)}% · fire {Math.round(hoverFrame.fire * 100)}%
+        {hf && (
+          <div className="chart-tip mono" style={{ left: Math.min(W - 170, Math.max(0, x(hf.t) + 10)) }}>
+            {hf.t.toFixed(1)} s · smoke {Math.round(hf.smoke * 100)}% · fire {Math.round(hf.fire * 100)}%
           </div>
         )}
       </div>
-    </section>
+    </div>
   );
 }

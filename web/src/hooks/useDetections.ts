@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Detections } from '../types';
 
-export function useDetections(url = '/detections.json') {
+export function useDetections(url = 'detections.json') {
   const [data, setData] = useState<Detections | null>(null);
   const [error, setError] = useState<string | null>(null);
 
